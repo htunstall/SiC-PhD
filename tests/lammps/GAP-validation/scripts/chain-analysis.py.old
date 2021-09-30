@@ -1,0 +1,230 @@
+# -*- coding: utf-8 -*-
+import os
+import rdf
+import ase.io
+import argparse
+import numpy             as np
+import networkx          as nx
+import matplotlib.pyplot as plt
+from ase.neighborlist    import NeighborList
+from matplotlib.ticker   import MaxNLocator
+from matplotlib.ticker   import MultipleLocator
+from itertools           import cycle
+from tqdm                import tqdm
+
+print("ASE VERSION:", ase.__version__)
+#------------------------------------------------------------------------------
+def check_chain(G, T, lpath):
+    ## Check there isn't a longer path
+    degrees = T.degree
+    
+    # No points starting on our source node
+    for node in lpath[1:]:
+        if degrees[node] == 1:
+            new_T = nx.dfs_tree(G, node)
+            new_lpath = nx.dag_longest_path(new_T)
+            if len(new_lpath) > len(lpath):
+                lpath = check_chain(G, T, new_lpath)
+            
+    return lpath
+
+#------------------------------------------------------------------------------
+
+# Bonding
+# C - C : 1.6 Angstrom
+# Si- C : 1.89 Angstrom
+# Si-Si : 2.35 Angstrom
+
+parser = argparse.ArgumentParser()
+parser.add_argument("filename", metavar="f", type=str, help="The NetCDF trajectory file")
+parser.add_argument("stride",   metavar="s", nargs="?", const=100, type=int, help="The stride to take the trajectory at")
+
+args        = parser.parse_args()
+
+max_chain = 45
+all_chains_dict = {}
+al_dict         = {}
+for element, cutoff, bad_species in [["C", 1.6,  ["Si"]], ["Si", 2.35, ["C"]]]:
+    if os.path.isfile("{}_chains_{}.txt".format(element.lower(), ".".join(args.filename.split(".")[:-1]))):
+        all_chains_dict[element] = np.loadtxt("{}_chains_{}.txt".format(element.lower(), ".".join(args.filename.split(".")[:-1])))
+        al_dict[element]         = ase.io.read("chain-marked_{}.{}.xyz".format(element, ".".join(args.filename.split(".")[:-1])), index=":")
+
+    else:
+        # Load the Atoms list
+        if args.filename.split(".")[-1] == "nc":
+            al_dict[element] = rdf.lammps2atoms(ase.io.NetCDFTrajectory(args.filename, "r")[::args.stride])
+        elif args.filename.split(".")[-1] == "xyz":
+            al_dict[element] = ase.io.read(args.filename, index="::{}".format(args.stride))
+        else:
+            sys.exit("Incorrect filename extension, neither `.nc` or `.xyz`")
+
+        # Build empty chains matrix
+        all_chains_dict[element]  = np.zeros((len(al_dict[element]),max_chain), dtype=int)
+
+        # Loop!
+        for frame, atoms in enumerate(tqdm(al_dict[element], desc="Working on element - {:>2s}".format(element))):
+            del atoms[[atom.index for atom in atoms if atom.symbol in bad_species]]
+
+            total_chains                 = 1
+            atoms.arrays["chain_id"]     = np.zeros(len(atoms))
+            atoms.arrays["chain_length"] = np.zeros(len(atoms))
+            cutoffs                      = [cutoff/2]*len(atoms)
+            
+            # Graph building
+            nl = NeighborList(cutoffs, skin=0, self_interaction=False, bothways=False)
+            nl.update(atoms)
+            cm = nl.get_connectivity_matrix()
+            G = nx.convert_matrix.from_scipy_sparse_matrix(cm)
+            
+            
+            chains = {}
+            total  = 0
+            done_node = set()
+            for source in range(len(atoms)):
+            
+                # Do the DFS
+                T = nx.dfs_tree(G, source)
+            
+                # Find most depth
+                if T.degree[source] == 1:
+                    # Find the longest path
+                    lpath = nx.dag_longest_path(T)
+                    
+                    # Check if it is the longest path in the whole sub-graph
+                    lpath = check_chain(G, T, lpath)
+                
+                    used_j = None
+                    for j, node in enumerate(lpath):
+                        if node in done_node:
+                            used_j = j
+                            break
+                        
+                    if used_j is not None:
+                        lpath = lpath[:j]
+                    
+                    # update the list of used nodes
+                    done_node.update(lpath)
+                                
+                    # Do we have a chain
+                    if len(lpath) > 1:
+                        # print("Source: {:>3d} has degree {} and length {:>2d}, ending at {:>3d}".format(source, T.degree[source], len(lpath), lpath[-1]))
+         
+                        atoms.arrays["chain_id"][lpath]     = total_chains
+                        atoms.arrays["chain_length"][lpath] = len(lpath)
+                        total_chains += 1        
+         
+                        # Update the dictionary
+                        if len(lpath) in chains.keys():
+                            chains[len(lpath)] += 1
+                        else:
+                            chains[len(lpath)] = 1
+                elif T.degree[source] == 0:
+                    # chain of lenge 0 (isolated atom)
+                    # Update the dictionary
+                    if 1 in chains.keys():
+                        chains[1] += 1
+                    else:
+                        chains[1] = 1
+                
+    
+            for key in sorted(chains.keys()):
+                if key >= all_chains_dict[element].shape[1]:
+                    print("Warning: There is a chain ({}) larger than the storage matrix ({})".format(key, all_chains_dict[element].shape[1]))
+                else:
+                    all_chains_dict[element][frame,key] = chains[key]
+            
+            
+        ase.io.write("chain-marked_{}.{}.xyz".format(element, ".".join(args.filename.split(".")[:-1])), al_dict[element])
+        np.savetxt("{}_chains_{}.txt".format(element.lower(), ".".join(args.filename.split(".")[:-1])), all_chains_dict[element])
+
+total_al = []
+# Zip up all the parts of the original atoms object
+for elementwise_al in zip(*al_dict.values()):
+
+    # Add the first element into the atoms
+    atoms = elementwise_al[0]
+
+    # For all additional elements add them in
+    for ind_atoms in elementwise_al[1:]:
+        atoms += ind_atoms
+    
+    # Save out the recombined elements
+    total_al.append(atoms.copy())
+
+ase.io.write("chain-marked_all.{}.xyz".format(".".join(args.filename.split(".")[:-1])), total_al)
+
+#------------------------------------------------------------------------------
+# Plotting
+#------------------------------------------------------------------------------
+fontsize    = 16
+
+colours     = ["C0", "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9"]
+styles      = ["-", "-.", "--", ":"]
+linecyclera = cycle(["k"] + [c+s for s in styles for c in colours])
+linecyclerb = cycle([c+s for s in styles for c in colours])
+
+
+for element in ["C", "Si"]:
+    print("Working on element: {}".format(element))
+    fig, axes = plt.subplots(1,2,figsize=(20,10))
+    time      = np.linspace(float(al_dict[element][0].info["time"]), float(al_dict[element][-1].info["time"]), len(al_dict[element]))
+    for i in range(1, max_chain):
+        if all_chains_dict[element][:,i].sum() != 0:
+            axes[0].plot(time, all_chains_dict[element][:,i], next(linecyclera), label="{}".format(i))
+            if i != 1:
+                axes[1].plot(time, all_chains_dict[element][:,i], next(linecyclerb), label="{}".format(i))
+        else:
+            print(" No {} length chains, not plotting".format(i))
+    
+    
+    axes[0].set_title("Chains (Including Isolated Atoms)", fontsize=fontsize+2)
+    axes[1].set_title("Chains", fontsize=fontsize+2)
+    
+    for ax in axes.flatten():
+        ax.legend(fontsize=fontsize, fancybox=True, shadow=True, ncol=4, loc="upper center", bbox_to_anchor=(0.5, -0.1), title="Chain Length") #, title_fontsize=16)
+        ax.tick_params(axis="both", labelsize=16)
+        
+        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+        ax.set_ylabel("Length of Chain", fontsize=fontsize)
+        ax.set_xlabel("Time [ps]", fontsize=fontsize)
+        ax.grid()
+        
+        ax.set_xlim((time[0], time[-1]))
+    
+    print()
+    fig.savefig("chains_{}_{}.png".format(element, ".".join(args.filename.split(".")[:-1])), dpi=300, bbox_inches="tight")
+
+#------------------------------------------------------------------------------
+# Chains Hist
+x        = np.arange(1, max_chain, 1, dtype=int)
+c_means  = np.mean(all_chains_dict["C"], axis=0)
+c_stdds  = np.std(all_chains_dict["C"], axis=0)
+
+si_means = np.mean(all_chains_dict["Si"], axis=0)
+si_stdds = np.std(all_chains_dict["Si"], axis=0)
+
+width = 0.35
+fig_bar, ax_bar = plt.subplots(figsize=(10,10))
+
+c_bars  = ax_bar.bar(x - width/2, c_means[1:],  width, label="Carbon")
+si_bars = ax_bar.bar(x + width/2, si_means[1:], width, label="Silicon")
+
+# Error Bars
+ax_bar.errorbar(x - width/2, c_means[1:],  yerr=c_stdds[1:],  ecolor="k", barsabove=True, fmt="none")
+ax_bar.errorbar(x + width/2, si_means[1:], yerr=si_stdds[1:], ecolor="k", barsabove=True, fmt="none")
+
+
+
+ax_bar.set_xlabel("Chain Length", fontsize=fontsize)
+ax_bar.set_ylabel("Average Number of Chains",        fontsize=fontsize)
+
+ax_bar.set_title("Average Number of Chains for each Chain Length", fontsize=fontsize+2)
+ax_bar.tick_params(axis="both", labelsize=fontsize)
+ax_bar.set_yscale("log")
+ax_bar.legend(fontsize=fontsize)
+ax_bar.grid()
+
+ax_bar.xaxis.set_minor_locator(MultipleLocator(1))
+ax_bar.set_xlim(0, max_chain)
+
+fig_bar.savefig("chains_bar_{}.png".format(".".join(args.filename.split(".")[:-1])), dpi=300, bbox_inches="tight")
