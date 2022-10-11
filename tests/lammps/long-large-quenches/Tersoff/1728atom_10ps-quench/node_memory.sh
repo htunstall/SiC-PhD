@@ -1,0 +1,1 @@
+../../scripts/node_memory.sh

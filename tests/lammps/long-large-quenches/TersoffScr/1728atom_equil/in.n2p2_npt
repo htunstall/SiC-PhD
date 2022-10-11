@@ -1,0 +1,89 @@
+#--------------------------------------------------------------------------------------------------
+# Default Parameters
+#--------------------------------------------------------------------------------------------------
+boundary     p p p
+units        metal
+atom_style   atomic
+
+#--------------------------------------------------------------------------------------------------
+# Units
+#--------------------------------------------------------------------------------------------------
+#  mass              = grams/mole
+#  distance          = Angstroms
+#  time              = picoseconds
+#  energy            = eV
+#  velocity          = Angstroms/picosecond
+#  force             = eV/Angstrom
+#  torque            = eV
+#  temperature       = Kelvin
+#  pressure          = bars
+#  dynamic viscosity = Poise
+#  charge            = multiple of electron charge (1.0 is a proton)
+#  dipole            = charge*Angstroms
+#  electric field    = volts/Angstrom
+#  density           = gram/cm^dim
+#
+#--------------------------------------------------------------------------------------------------
+# Geometry
+#--------------------------------------------------------------------------------------------------
+read_restart restart.in
+
+mass      1 12.0107
+mass      2 28.0855
+
+#--------------------------------------------------------------------------------------------------
+# Potential
+#--------------------------------------------------------------------------------------------------
+# Tersoff
+pair_style   atomistica TersoffScr
+pair_coeff   * * C Si
+
+neighbor     2. nsq
+neigh_modify every 1 delay 0 check yes
+
+#--------------------------------------------------------------------------------------------------
+# Variables
+#--------------------------------------------------------------------------------------------------
+variable dt        equal  5e-4              # 0.5 femtoseconds
+variable outp_evry equal  100               # Output coordinates   1/10 frames
+variable thrm_evry equal  100               # Output physical data 1/10 frames
+variable Tstart    equal  4750              # Kelvin
+variable Tstop     equal  4750              # Kelvin
+variable Tdamp     equal  0.5               # picoseconds
+variable Pstart    equal  1                 # bar (~1 atmosphere)
+variable Pstop     equal  1                 # bar (~1 atmosphere)
+variable Pdamp     equal  1                 # picoseconds
+
+# Set the timestep
+timestep       ${dt}
+
+# Output Format
+#                    1    2    3    4  5  6      7     8       9   10 11 12 13  14  15  16  17  18
+thermo_style  custom step time temp pe ke etotal press density vol lx ly lz xlo xhi ylo yhi zlo zhi
+thermo_modify format line "%i %10.8G %10.8G %18.16G %18.16G %18.16G %10.8G %8.6G %10.8G %10.8G %10.8G %10.8G %10.8G %10.8G %10.8G %10.8G %10.8G %10.8G"
+thermo        ${thrm_evry}
+
+#--------------------------------------------------------------------------------------------------
+# Quench NPT
+#--------------------------------------------------------------------------------------------------
+variable time        equal 250                            # picoseconds of simulation time
+variable steps       equal ${time}/${dt}             # Number of steps
+
+
+# NPT Equil to Tersoff from GAP
+fix 1 all npt temp ${Tstart} ${Tstop} ${Tdamp} iso ${Pstart} ${Pstop} ${Pdamp}
+dump 1 all netcdf ${outp_evry} dump.equil.nc element mass x y z vx vy vz fx fy fz xu yu zu
+
+run           ${steps}
+
+write_restart restart.equil.final
+
+
+undump 1
+
+# NPT 
+dump 1 all netcdf ${outp_evry} dump.nc element mass x y z vx vy vz fx fy fz xu yu zu
+
+run           ${steps}
+
+write_restart restart.final
