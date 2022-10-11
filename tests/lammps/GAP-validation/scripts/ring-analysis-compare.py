@@ -2,6 +2,7 @@
 import os
 import rdf
 import sys
+import glob
 import ase.io
 import argparse
 import pandas            as pd
@@ -24,14 +25,13 @@ print("ASE VERSION:", ase.__version__)
 # Si-Si : 2.35 Angstrom
 
 parser = argparse.ArgumentParser()
-parser.add_argument("type",                                       type=str, help="The type of directory you wish to plot e.g. 3000K, quench_010ps etc.")
-parser.add_argument("dirs",             nargs="+",                type=str, help="The directories you wish to plot the chain histogram for")
-parser.add_argument("-d", "--dft",      action="store_true",                help="Plot DFT data")
+parser.add_argument("type",                                               type=str, help="The type of directory you wish to plot e.g. 3000K, quench_010ps etc.")
+parser.add_argument("dirs",               nargs="+",                      type=str, help="The directories you wish to plot the ring histogram for")
+parser.add_argument("--dft",                         action="store_true",           help="Plot DFT data")
+parser.add_argument("--elements",         nargs="+", default=["C","Si"],  type=str, help="The elements we wish to plot for comparison")
+parser.add_argument("--max_ring_display", nargs="?", default=10,          type=int, help="The maximum size of ring that will be shown on the graph")
 
 args = parser.parse_args()
-
-species         = ["C", "Si"]
-graph_max_chain = 15
 
 if args.type.startswith("quench"):
     filename = "dump.300K-equil.nc"
@@ -56,8 +56,7 @@ if dft_dir is not None:
     args.dirs.insert(0, dft_dir)
 
 
-max_chain = 45
-chains_per_dir = []
+rings_per_dir = []
 for i, _dir in enumerate(args.dirs):
     old_root = os.getcwd()
 
@@ -70,16 +69,20 @@ for i, _dir in enumerate(args.dirs):
         os.chdir(os.path.join(_dir, args.type))
 
 
-    all_chains_dict = {}
-    for element in species:
-        if os.path.isfile("{}_chains_{}.txt".format(element.lower(), ".".join(filename.split(".")[:-1]))):
-            all_chains_dict[element] = np.loadtxt("{}_chains_{}.txt".format(element.lower(), ".".join(filename.split(".")[:-1])))
+    all_rings_dict = {}
+    for element in args.elements:
+        data_filename = "rings_stride-*_element-{}.txt".format(element)
+        data_filename = glob.glob(data_filename)[0]
+
+
+        if os.path.isfile(data_filename):
+            all_rings_dict[element] = np.loadtxt(data_filename)
     
         else:
-            sys.exit("Can't read chain data in directory: {}".format(_dir))#
+            sys.exit("Can't read ring data in directory: {}".format(_dir))
     os.chdir(old_root)
 
-    chains_per_dir.append(all_chains_dict)
+    rings_per_dir.append(all_rings_dict)
 
     if i == 0 and dft_dir is not None:
         filename = old_filename
@@ -96,14 +99,14 @@ linecyclerb = cycle([c+s for s in styles for c in colours])
 
 
 #------------------------------------------------------------------------------
-# Chains Hist
+# Rings Hist
 #width     = 0.7 / len(args.dirs)
 fig, axes = plt.subplots(2,1, figsize=(20,15))
 
-for plot_i, species in enumerate(species):
+for plot_i, element in enumerate(args.elements):
     df_data = []
-    for i, (all_chains_dict, _dir) in enumerate(zip(chains_per_dir, args.dirs)):
-        data = [(index, value, _dir, species) for index, _list in enumerate(all_chains_dict[species].T) if index < graph_max_chain for value in _list]
+    for i, (all_rings_dict, _dir) in enumerate(zip(rings_per_dir, args.dirs)):
+        data = [(index, value, _dir, element) for index, _list in enumerate(all_rings_dict[element].T) if index < args.max_ring_display for value in _list]
         for item in data:
             df_data.append(item)
 
@@ -116,29 +119,12 @@ for plot_i, species in enumerate(species):
 
 
 
-#    x        = np.arange(1, max_chain, 1, dtype=int)
-#    c_means  = np.mean(all_chains_dict["C"], axis=0)
-#    c_stdds  = np.std(all_chains_dict["C"], axis=0)
-#    
-#    si_means = np.mean(all_chains_dict["Si"], axis=0)
-#    si_stdds = np.std(all_chains_dict["Si"], axis=0)
-#    
-#    
-#    c_bars  = ax[0].bar(x - width/2, c_means[1:],  width, label="Carbon {}".format(_dir))
-#    si_bars = ax[1].bar(x + width/2, si_means[1:], width, label="Silicon {}".format(_dir))
-#    
-#    # Error Bars
-#    ax[0].errorbar(x - width/2, c_means[1:],  yerr=c_stdds[1:],  ecolor="k", barsabove=True, fmt="none")
-#    ax[1].errorbar(x + width/2, si_means[1:], yerr=si_stdds[1:], ecolor="k", barsabove=True, fmt="none")
-
-
-
-axes[0].set_title("Average Number of Chains per Chain Length (Carbon)", fontsize=fontsize+2)
-axes[1].set_title("Average Number of Chains per Chain Length (Silicon)", fontsize=fontsize+2)
+axes[0].set_title("Average Number of Rings per Rings Size (Carbon)",  fontsize=fontsize+2)
+axes[1].set_title("Average Number of Rings per Rings Size (Silicon)", fontsize=fontsize+2)
 
 for ax in axes:
-    ax.set_xlabel("Chain Length", fontsize=fontsize)
-    ax.set_ylabel("Average Number of Chains", fontsize=fontsize)
+    ax.set_xlabel("Rings Size", fontsize=fontsize)
+    ax.set_ylabel("Average Number of Rings", fontsize=fontsize)
     
     ax.tick_params(axis="both", labelsize=fontsize)
     ax.set_yscale("log")
@@ -149,7 +135,8 @@ for ax in axes:
 #    ax.xaxis.set_minor_locator(MultipleLocator(1))
 #    ax.set_xlim(0, max_chain)
     ax.set_ylim(bottom=0)
+    ax.set_xlim(left=2.5)
 
 fig.tight_layout(pad=3)
 
-fig.savefig("combined-bar-plot_{}_chain-analysis_cut-{}.png".format(args.type, graph_max_chain), dpi=300, bbox_inches="tight")
+fig.savefig("combined-bar-plot_{}_ring-analysis_cut-{}.png".format(args.type, args.max_ring_display), dpi=300, bbox_inches="tight")

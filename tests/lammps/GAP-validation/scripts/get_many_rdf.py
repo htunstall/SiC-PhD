@@ -19,7 +19,7 @@ def plot_rdf(midpoints, data, label, axes):
         axes[row,col].plot(midpoints, y, label=label)
 
 #=================================================================
-fontsize = 20
+fontsize = 26
 verbose  = True
 
 
@@ -28,12 +28,21 @@ parser = argparse.ArgumentParser()
 parser.add_argument("filename",                                   type=str, help="The NetCDF trajectory file")
 parser.add_argument("type",                                       type=str, help="The type of directory you wish to plot e.g. 3000K, quench_010ps etc.")
 parser.add_argument("dirs",             nargs="+",                type=str, help="The directories you wish to plot the RDF for")
+parser.add_argument("--labels",         nargs="+", default=None,  type=str, help="The labels for the RDF plots")
 parser.add_argument("-s", "--stride",   nargs="?", default=100,   type=int, help="The stride to take the trajectory at")
 parser.add_argument("-d", "--dft",      nargs="?", default="npt", type=str, help="Which DFT are we plotting: NPT, NVT or Amorphous (case insensitive)")
 
 parser.add_argument("-e", "--exp",      action="store_true",                help="Plot the experemntal RDFs")
 
 args = parser.parse_args()
+
+if args.labels is None:
+    args.labels = [None] * len(args.dirs)
+elif type(args.labels) is list:
+    if len(args.labels) != len(args.dirs):
+        sys.exit("You have a diffrent number of labels ({}) and directories ({})".format(len(args.labels), len(args.dirs)))
+
+root = os.getcwd()
 
 dfts = ["npt", "nvt", "amorphous"]
 if args.dft.lower() not in dfts:
@@ -44,7 +53,7 @@ print("Plotting with:\n DFT: {}\n Experemental: {}\n Simulation Type: {}\n".form
 # The figures
 fig1, axes1 = plt.subplots(2,2, figsize=(20,20)) # total average
    
-for _dir in args.dirs:
+for _dir, label in zip(args.dirs, args.labels):
     print("Working on: `{}`".format(_dir))
     os.chdir(os.path.join(_dir, args.type))
     # Only lord the dir if we don't have rdf files
@@ -70,9 +79,14 @@ for _dir in args.dirs:
             np.mean(sic_array_2d,  axis=0),
             np.mean(all_array_2d,  axis=0)]
     
-    plot_rdf(midpoints, data, _dir, axes1)
+    if label is not None:
+        comment = label
+    else:
+        comment = _dir
 
-    os.chdir(os.path.join("..", ".."))
+    plot_rdf(midpoints, data, comment, axes1)
+
+    os.chdir(root)
     print()
 
 
@@ -169,7 +183,7 @@ for ax in axes1.flatten():
 
 # Set global legend
 handles, labels = axes1[1,1].get_legend_handles_labels()
-lgd = fig1.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, 0.01), fontsize=fontsize-4)
+lgd = fig1.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, -0.01), fontsize=fontsize-4, ncol=3)
 
 
 fig1.tight_layout(pad=3)
@@ -178,5 +192,6 @@ fig1.subplots_adjust(bottom=0.2)
 # Saving
 #==================================================
 fig1.savefig("rdf_{}_combined.png".format(args.type), dpi=150, bbox_inches="tight", bbox_extra_artists=(lgd,))
+fig1.savefig("rdf_{}_combined_publication.png".format(args.type), dpi=600, bbox_inches="tight", bbox_extra_artists=(lgd,), transparent=True)
 
 print("Finished!")

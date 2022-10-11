@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import numpy             as np
 
 #=================================================================
-fontsize = 20
+fontsize = 28 #20
 verbose  = True
 comment  = os.path.basename(os.getcwd())
 
@@ -24,7 +24,14 @@ args = parser.parse_args()
 
 
 print("Loading the trajectory")
-atoms_list = rdf.lammps2atoms(ase.io.NetCDFTrajectory(args.filename, "r")[::args.stride])
+atoms_list = None
+if args.filename.endswith(".nc"):
+    atoms_list = rdf.lammps2atoms(ase.io.NetCDFTrajectory(args.filename, "r")[::args.stride])
+elif args.filename.endswith(".xyz"):
+    atoms_list = ase.io.read(args.filename, index="::{}".format(args.stride))
+else:
+    sys.exit("Trajectory format not underrstood")
+
 print("The size is:", len(atoms_list))
 #atoms_list = ase.io.read("mod.SiC-pos-1.xyz", index=":")
 
@@ -55,10 +62,10 @@ def plot_rdf(midpoints, data, label, axes):
 # Average
 #==================================================
 #                                             cutoff, s1, s2
-cc_array_2d,   midpoints = rdf.get_rdf(atoms_list, 6,  6,  6, verbose=verbose, save=True, comment=comment)
-sisi_array_2d, midpoints = rdf.get_rdf(atoms_list, 6, 14, 14, verbose=verbose, save=True, comment=comment)
-sic_array_2d,  midpoints = rdf.get_rdf(atoms_list, 6, 14,  6, verbose=verbose, save=True, comment=comment)
-all_array_2d,  midpoints = rdf.get_rdf(atoms_list, 6,         verbose=verbose, save=True, comment=comment)
+cc_array_2d,   midpoints = rdf.get_rdf(atoms_list, 6,  6,  6, verbose=verbose, save=True, comment=comment, bins=200)
+sisi_array_2d, midpoints = rdf.get_rdf(atoms_list, 6, 14, 14, verbose=verbose, save=True, comment=comment, bins=200)
+sic_array_2d,  midpoints = rdf.get_rdf(atoms_list, 6, 14,  6, verbose=verbose, save=True, comment=comment, bins=200)
+all_array_2d,  midpoints = rdf.get_rdf(atoms_list, 6,         verbose=verbose, save=True, comment=comment, bins=200)
 
 data = [np.mean(cc_array_2d,   axis=0),
         np.mean(sisi_array_2d, axis=0),
@@ -66,7 +73,6 @@ data = [np.mean(cc_array_2d,   axis=0),
         np.mean(all_array_2d,  axis=0)]
 
 plot_rdf(midpoints, data, comment, axes1)
-
 
 #==================================================
 # Discrete Blocks
@@ -114,7 +120,7 @@ for k in range(cc_array_blocks_2d.shape[0]):
 if args.dft.lower() == "npt":
     old_root = os.getcwd()
     label = "DFT @ 3000 K (NPT)"
-    os.chdir("/storage/chem/msufgx/postgrad/software/SiC-framework/testing-dir/lammps/rdf-size-time-effect/structures/216_atoms/dft-like-quench/DFT_NPT")
+    os.chdir("/storage/mssnkt_grp/msufgx/gits/SiC-framework/testing-dir/lammps/rdf-size-time-effect/structures/216_atoms/dft-like-quench/DFT_NPT")
     dft_cc_array_2d,   dft_midpoints = rdf.get_rdf([], 6,  6,  6, verbose=verbose, save=True, comment="DFT_NPT")
     dft_sisi_array_2d, dft_midpoints = rdf.get_rdf([], 6, 14, 14, verbose=verbose, save=True, comment="DFT_NPT")
     dft_sic_array_2d,  dft_midpoints = rdf.get_rdf([], 6, 14,  6, verbose=verbose, save=True, comment="DFT_NPT")
@@ -128,7 +134,7 @@ if args.dft.lower() == "npt":
 elif args.dft.lower() == "nvt":
     old_root = os.getcwd()
     label = "DFT @ 3000 K (NVT)"
-    os.chdir("/storage/chem/msufgx/postgrad/software/SiC-framework/testing-dir/lammps/rdf-size-time-effect/structures/216_atoms/dft-like-quench/DFT_NVT")
+    os.chdir("/storage/mssnkt_grp/msufgx/gits/SiC-framework/testing-dir/lammps/rdf-size-time-effect/structures/216_atoms/dft-like-quench/DFT_NVT")
     dft_cc_array_2d,   dft_midpoints = rdf.get_rdf([], 6,  6,  6, verbose=verbose, save=True, comment="DFT_NVT")
     dft_sisi_array_2d, dft_midpoints = rdf.get_rdf([], 6, 14, 14, verbose=verbose, save=True, comment="DFT_NVT")
     dft_sic_array_2d,  dft_midpoints = rdf.get_rdf([], 6, 14,  6, verbose=verbose, save=True, comment="DFT_NVT")
@@ -141,7 +147,7 @@ elif args.dft.lower() == "nvt":
 elif args.dft.lower() == "amorphous":
     old_root = os.getcwd()
     label = "DFT @ 300 K"
-    os.chdir("/storage/chem/msufgx/postgrad/software/SiC-framework/testing-dir/CP2K/long-quench-last-step-300K")
+    os.chdir("/storage/mssnkt_grp/msufgx/gits/SiC-framework/testing-dir/CP2K/long-quench-last-step-300K")
     dft_cc_array_2d,   dft_midpoints = rdf.get_rdf([], 6,  6,  6, verbose=verbose, save=True, comment="long-quench-last-step-300K")
     dft_sisi_array_2d, dft_midpoints = rdf.get_rdf([], 6, 14, 14, verbose=verbose, save=True, comment="long-quench-last-step-300K")
     dft_sic_array_2d,  dft_midpoints = rdf.get_rdf([], 6, 14,  6, verbose=verbose, save=True, comment="long-quench-last-step-300K")
@@ -168,13 +174,13 @@ for (i,j), y, label, title in to_plot:
 # Experemental
 #==================
 if args.exp:
-    exp_data = np.loadtxt("/storage/chem/msufgx/postgrad/software/SiC-framework/analysis/RDF/sorted.experemental_800C-annealed-amorphous.txt")
-    axes1[1,1].plot(exp_data[:,0]*10, exp_data[:,1], "--", c="k", label="annealed 800C (Exp.)")
+    exp_data = np.loadtxt("/storage/mssnkt_grp/msufgx/gits/SiC-framework/analysis/RDF/sorted.experemental_800C-annealed-amorphous.txt")
+    axes1[1,1].plot(exp_data[:,0]*10, exp_data[:,1], "--", c="k", label="Annealed 800 °C (Exp.)")
     
-    exp_data = np.loadtxt("/storage/chem/msufgx/postgrad/software/SiC-framework/analysis/RDF/filtered.csv", delimiter=",")
+    exp_data = np.loadtxt("/storage/mssnkt_grp/msufgx/gits/SiC-framework/analysis/RDF/filtered.csv", delimiter=",")
     axes1[1,1].plot(exp_data[:,0]*10, exp_data[:,1], "-.", c="k", label="Filtered (Exp.)")
     
-    exp_data = np.loadtxt("/storage/chem/msufgx/postgrad/software/SiC-framework/analysis/RDF/unfiltered.csv", delimiter=",")
+    exp_data = np.loadtxt("/storage/mssnkt_grp/msufgx/gits/SiC-framework/analysis/RDF/unfiltered.csv", delimiter=",")
     axes1[1,1].plot(exp_data[:,0]*10, exp_data[:,1], ".", c="k", label="Unfiltered (Exp.)")
 
 
@@ -194,11 +200,11 @@ for ax in list(axes1.flatten()) + list(axes2.flatten()) + list(axes3.flatten()):
     ax.tick_params(axis="both", which="major", labelsize=fontsize-2)
     ax.set_xlabel("Distance [$\AA$]", fontsize=fontsize)
     ax.set_ylabel("g(r)",             fontsize=fontsize)
-    ax.legend(ncol=3, bbox_to_anchor=(0.5, -0.1), loc="upper center", fontsize=fontsize-4)
+    ax.legend(ncol=2, bbox_to_anchor=(0.5, -0.1), loc="upper center", fontsize=fontsize-4)
     ax.grid()
 
 for fig in [fig1, fig2, fig3]:
-    fig.tight_layout(pad=3)
+    fig.tight_layout(pad=5)
 
 #==================================================
 # Saving
